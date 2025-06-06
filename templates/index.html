@@ -1,1 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Real-time Chess</title>
+
+  <!-- Chessboard.js CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #2e2e2e;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    #board {
+      width: 400px;
+      margin-bottom: 20px;
+    }
+
+    #status {
+      margin-bottom: 20px;
+      font-size: 1.2rem;
+    }
+
+    #roomInput, #joinBtn {
+      font-size: 1rem;
+      padding: 8px 12px;
+    }
+
+    #roomInput {
+      width: 180px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Real-time Chess Board</h1>
+
+  <div>
+    <input type="text" id="roomInput" placeholder="Enter room ID (e.g. game123)" />
+    <button id="joinBtn">Join Game</button>
+  </div>
+
+  <div id="status">Not connected</div>
+
+  <div id="board"></div>
+
+  <!-- Include jQuery (required by chessboard.js) -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+  <!-- Chessboard.js -->
+  <script src="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+
+  <!-- Chess.js (for move validation and game logic) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/1.0.0/chess.min.js"></script>
+
+  <!-- Socket.IO client -->
+  <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+
+  <script>
+    $(function () {
+      let board = null;
+      let game = new Chess();
+      let socket = null;
+      let room = null;
+      let statusEl = $('#status');
+
+      function updateStatus() {
+        if (game.in_checkmate()) {
+          statusEl.text('Game over: Checkmate!');
+        } else if (game.in_draw()) {
+          statusEl.text('Game over: Draw!');
+        } else {
+          statusEl.text('Turn: ' + (game.turn() === 'w' ? 'White' : 'Black'));
+          if (game.in_check()) {
+            statusEl.append(' (Check)');
+          }
+        }
+      }
+
+      function onDrop(source, target, piece, newPos, oldPos, orientation) {
+        // Attempt move
+        let move = game.move({
+          from: source,
+          to: target,
+          promotion: 'q' // always promote to queen for simplicity
+        });
+
+        // Illegal move
+        if (move === null) return 'snapback';
+
+        // Valid move - send to server
+        socket.emit('move', {
+          room: room,
+          fen: game.fen(),
+          move: move.san
+        });
+
+        updateStatus();
+      }
+
+      function onSnapEnd() {
+        board.position(game.fen());
+      }
+
+      function initBoard() {
+        board = Chessboard('board', {
+          draggable: true,
+          position: 'start',
+          onDrop: onDrop,
+          onSnapEnd: onSnapEnd
+        });
+      }
+
+      function connectSocket() {
+        socket = io();
+
+        socket.on('connect', () => {
+          statusEl.text('Connected to server, joined room ' + room);
+          socket.emit('join', { room: room });
+        });
+
+        socket.on('disconnect', () => {
+          statusEl.text('Disconnected from server');
+        });
+
+        socket.on('game_state', (data) => {
+          if (!data.fen) return;
+          game.load(data.fen);
+          board.position(data.fen);
+          updateStatus();
+        });
+      }
+
+      $('#joinBtn').on('click', () => {
+        const inputRoom = $('#roomInput').val().trim();
+        if (!inputRoom) {
+          alert('Please enter a valid room ID!');
+          return;
+        }
+        room = inputRoom;
+
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+        game.reset();
+        initBoard();
+        connectSocket();
+      });
+
+      // Initialize empty board at start
+      initBoard();
+      updateStatus();
+    });
+  </script>
+</body>
+</html>
 
